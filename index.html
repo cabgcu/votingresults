@@ -14,7 +14,7 @@ import {
   getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import {
-  getAuth, signInWithEmailAndPassword, signOut
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { initializeAppCheck, ReCaptchaV3Provider, getToken }
   from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app-check.js";
@@ -39,11 +39,6 @@ const appCheck = initializeAppCheck(app, {
   isTokenAutoRefreshEnabled: true
 });
 
-/* ========= Live Token Check ========= */
-getToken(appCheck)
-  .then(t => console.log("✅ App Check token issued:", t?.token?.slice(0, 25) + "..."))
-  .catch(err => console.error("❌ App Check failed:", err));
-
 /* ========= Firestore + Auth ========= */
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -51,14 +46,6 @@ const auth = getAuth(app);
 /* ========= Globals ========= */
 let votingEnabled = true;
 const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2", "HYkN0qZc8aNgGOtrxT0VWKBWYbO2"];
-
-/* ========= SHA-256 helper ========= */
-async function sha256Hex(text) {
-  const enc = new TextEncoder().encode(text);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, "0")).join("");
-}
 
 /* ========= Firestore listeners & rendering ========= */
 function subscribeToVotes() {
@@ -107,21 +94,8 @@ async function toggleVoting() {
   updateStatus();
 }
 
-/* ========= Clear Results (Admin Only) ========= */
 async function clearResults() {
   if (!confirm("Clear all votes? This is permanent.")) return;
-
-  const user = auth.currentUser;
-  if (!user) {
-    alert("You must sign in before clearing votes.");
-    return;
-  }
-
-  if (!allowedAdmins.includes(user.uid)) {
-    alert("Access denied: you are not authorized to clear results.");
-    return;
-  }
-
   try {
     const qSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
     const deletions = qSnap.docs.map(d => deleteDoc(d.ref));
@@ -141,75 +115,46 @@ function updateStatus() {
   document.getElementById("toggle-voting-btn").textContent = votingEnabled ? "Turn Off Voting" : "Turn On Voting";
 }
 
-/* ========= Auth helpers ========= */
-async function adminSignIn(email, password) {
+/* ========= Auth Logic ========= */
+async function handleSignIn(email, password) {
   try {
-    await signInWithEmailAndPassword(auth, email, password);
-    const uid = auth.currentUser.uid;
-    const label = allowedAdmins.includes(uid) ? " (Admin)" : "";
-    document.getElementById("admin-status").textContent =
-      `Signed in as ${auth.currentUser.email}${label}`;
-    document.getElementById("clear-results-btn").disabled = !allowedAdmins.includes(uid);
-    document.getElementById("admin-signin-btn").textContent = "Sign Out";
-  } catch (e) {
-    console.error(e);
-    alert("Admin sign-in failed: " + (e.message || e));
-  }
-}
+    const userCred = await signInWithEmailAndPassword(auth, email, password);
+    const uid = userCred.user.uid;
 
-async function adminSignOut() {
-  try {
-    await signOut(auth);
-  } catch (e) {
-    console.error(e);
-  } finally {
-    document.getElementById("admin-status").textContent = "Not signed in";
-    document.getElementById("clear-results-btn").disabled = true;
-    document.getElementById("admin-signin-btn").textContent = "Admin Sign In";
-  }
-}
-
-/* ========= DOM wiring ========= */
-const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27"; // "Canyon49!"
-
-document.addEventListener("DOMContentLoaded", () => {
-  const loginForm = document.getElementById("login-form");
-  const loginSection = document.getElementById("login-section");
-  const resultsSection = document.getElementById("results-section");
-
-  // Admin modal controls
-  const adminSigninBtn = document.getElementById("admin-signin-btn");
-  adminSigninBtn.addEventListener("click", async () => {
-    if (auth.currentUser) {
-      await adminSignOut();
+    if (!allowedAdmins.includes(uid)) {
+      alert("Access denied: you are not authorized.");
+      await signOut(auth);
       return;
     }
-    const email = prompt("Admin email (example: admin@lipsync2025.com):");
-    if (!email) return;
-    const password = prompt("Admin password:");
-    if (password === null) return;
-    await adminSignIn(email.trim(), password);
+
+    document.getElementById("login-section").classList.add("hidden");
+    document.getElementById("results-section").classList.remove("hidden");
+    document.getElementById("admin-status").textContent = `Signed in as ${email} (Admin)`;
+    subscribeToVotes();
+    updateStatus();
+
+  } catch (e) {
+    alert("Sign-in failed: " + (e.message || e));
+  }
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    document.getElementById("login-section").classList.remove("hidden");
+    document.getElementById("results-section").classList.add("hidden");
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value.trim();
+    await handleSignIn(email, password);
   });
 
   document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
   document.getElementById("clear-results-btn").addEventListener("click", clearResults);
-
-  // Password gate
-  loginForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const entered = document.getElementById("password").value.trim();
-    const hash = await sha256Hex(entered);
-    if (hash === correctHash) {
-      loginSection.classList.add("hidden");
-      resultsSection.classList.remove("hidden");
-      subscribeToVotes();
-      document.getElementById("clear-results-btn").disabled = true;
-      updateStatus();
-    } else {
-      alert("Incorrect password.");
-      document.getElementById("password").value = "";
-    }
-  });
 });
 </script>
 
@@ -269,19 +214,21 @@ body {
 </head>
 
 <body>
-<video autoplay loop muted playsinline id="login-bg-video" src="https://i.imgur.com/Aqrg8yc.mp4"></video>
+<video autoplay loop muted playsinline id="login-bg-video" src="https://i.imgur.com/mAzP2S1.mp4"></video>
 
-<!-- Password Screen -->
+<!-- Admin Login Screen -->
 <section id="login-section" class="fullscreen-center">
   <div class="glass-card flex flex-col items-center justify-center space-y-6">
     <img class="w-full max-w-[160px] mx-auto" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
-    <h2 class="text-xl font-bold">Enter Password</h2>
+    <h2 class="text-xl font-bold">Admin Login</h2>
     <form id="login-form" class="w-full max-w-xs mx-auto space-y-3">
+      <input id="email" type="email" placeholder="Admin Email"
+        class="w-full px-4 py-2 rounded-lg bg-black/40 border border-white/30 text-white text-center focus:outline-none">
       <input id="password" type="password" placeholder="Password"
         class="w-full px-4 py-2 rounded-lg bg-black/40 border border-white/30 text-white text-center focus:outline-none">
-      <button type="submit" class="frosted-btn small">Enter</button>
+      <button type="submit" class="frosted-btn small w-full">Sign In</button>
     </form>
-    <p class="text-sm text-white/60">Use the event password to access this dashboard.</p>
+    <p class="text-sm text-white/60">Only authorized administrators may access this dashboard.</p>
   </div>
 </section>
 
@@ -299,7 +246,7 @@ body {
 
       <div class="flex gap-2 items-center">
         <button id="toggle-voting-btn" class="frosted-btn small">Turn Off Voting</button>
-        <button id="admin-signin-btn" class="frosted-btn small">Admin Sign In</button>
+        <button id="clear-results-btn" class="frosted-btn small">Clear Results</button>
       </div>
     </div>
 
@@ -307,9 +254,6 @@ body {
 
     <div class="mt-4 flex items-center justify-between">
       <div id="admin-status" class="text-sm text-white/60">Not signed in</div>
-      <div>
-        <button id="clear-results-btn" class="frosted-btn small" disabled>Clear Results</button>
-      </div>
     </div>
 
     <p class="text-xs text-white/70 mt-2">Refreshing in real-time as votes are cast.</p>
