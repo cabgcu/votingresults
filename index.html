@@ -3,15 +3,21 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Lip Sync 2025 Results</title>
+<title>Lip Sync 2025 Results (Admin)</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
 
 <script type="module">
+/* ========= Firebase imports ========= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import {
+  getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs
+} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import {
+  getAuth, signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-/* Firebase Config */
+/* ========= Firebase Config ========= */
 const firebaseConfig = {
   apiKey: "AIzaSyBoYf1_IhILJ96Y9KMcwrVjHMFLT5YEKuQ",
   authDomain: "lip-sync-2025.firebaseapp.com",
@@ -24,24 +30,30 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
+/* ========= Globals ========= */
 let votingEnabled = true;
 
-/* SHA-256 helper */
+/* ========= SHA-256 helper (for Canyon49! password gate) ========= */
 async function sha256Hex(text) {
   const enc = new TextEncoder().encode(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-/* Firestore listeners */
+/* ========= Firestore listeners & rendering ========= */
 function subscribeToVotes() {
   const q = query(collection(db, "lip_sync_2025_votes"));
   onSnapshot(q, (snap) => {
     const counts = { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 };
-    snap.forEach(d => { if (d.data().voteId in counts) counts[d.data().voteId]++; });
+    snap.forEach(d => {
+      const data = d.data();
+      if (data && data.voteId && counts.hasOwnProperty(data.voteId)) counts[data.voteId]++;
+    });
     renderResults(counts);
   });
+
   onSnapshot(doc(db, "lip_sync_2025_settings", "state"), (snap) => {
     if (snap.exists()) {
       votingEnabled = snap.data().enabled;
@@ -70,45 +82,108 @@ function renderResults(counts) {
   document.getElementById("total-votes").textContent = `Total Votes: ${total}`;
 }
 
+/* ========= Controls ========= */
 async function toggleVoting() {
   votingEnabled = !votingEnabled;
   await setDoc(doc(db, "lip_sync_2025_settings", "state"), { enabled: votingEnabled });
   updateStatus();
 }
 
+/* Clear results — requires admin to be signed in with Firebase (email/password) */
 async function clearResults() {
-  if (!confirm("Clear all votes?")) return;
-  const qSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
-  const deletions = qSnap.docs.map(d => deleteDoc(d.ref));
-  await Promise.all(deletions);
-  alert("All results cleared!");
+  if (!confirm("Clear all votes? This is permanent.")) return;
+
+  // Require authenticated admin
+  const user = auth.currentUser;
+  if (!user) {
+    alert("You must sign in as admin before clearing votes.");
+    return;
+  }
+
+  try {
+    const qSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
+    const deletions = qSnap.docs.map(d => deleteDoc(d.ref));
+    await Promise.all(deletions);
+    alert("All results cleared!");
+  } catch (e) {
+    console.error(e);
+    alert("Failed to clear votes: " + (e.message || e));
+  }
 }
 
+/* ========= UI helpers ========= */
 function updateStatus() {
   const label = document.getElementById("voting-status-label");
   label.textContent = votingEnabled ? "Voting: ON" : "Voting: OFF";
-  label.className = votingEnabled ? "text-green-400 font-semibold mb-3" : "text-red-400 font-semibold mb-3";
+  label.className = votingEnabled ? "text-green-400 font-semibold mb-2" : "text-red-400 font-semibold mb-2";
   document.getElementById("toggle-voting-btn").textContent = votingEnabled ? "Turn Off Voting" : "Turn On Voting";
 }
 
-/* Password Gate (SHA-256 hash of "Canyon49!") */
-const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27";
+/* ========= Auth helpers ========= */
+async function adminSignIn(email, password) {
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    document.getElementById("admin-status").textContent = `Signed in as ${auth.currentUser.email}`;
+    document.getElementById("clear-results-btn").disabled = false;
+    document.getElementById("admin-signin-btn").textContent = "Sign Out";
+  } catch (e) {
+    console.error(e);
+    alert("Admin sign-in failed: " + (e.message || e));
+  }
+}
+
+async function adminSignOut() {
+  try {
+    await auth.signOut();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    document.getElementById("admin-status").textContent = "Not signed in";
+    document.getElementById("clear-results-btn").disabled = true;
+    document.getElementById("admin-signin-btn").textContent = "Admin Sign In";
+  }
+}
+
+/* ========= DOM wiring ========= */
+const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27"; // SHA-256 of "Canyon49!"
 
 document.addEventListener("DOMContentLoaded", () => {
   const loginForm = document.getElementById("login-form");
   const loginSection = document.getElementById("login-section");
   const resultsSection = document.getElementById("results-section");
 
+  // Admin modal controls
+  const adminSigninBtn = document.getElementById("admin-signin-btn");
+  adminSigninBtn.addEventListener("click", async () => {
+    if (auth.currentUser) {
+      await adminSignOut();
+      return;
+    }
+    // ask for email + password (admin should enter it here)
+    const email = prompt("Admin email (example: admin@lipsync2025.com):");
+    if (!email) return;
+    const password = prompt("Admin password:");
+    if (password === null) return;
+    await adminSignIn(email.trim(), password);
+  });
+
+  document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
+  document.getElementById("clear-results-btn").addEventListener("click", clearResults);
+
+  // Password gate
   loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const entered = document.getElementById("password").value.trim();
     const hash = await sha256Hex(entered);
     if (hash === correctHash) {
+      // Reveal results dashboard
       loginSection.classList.add("hidden");
       resultsSection.classList.remove("hidden");
-      document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
-      document.getElementById("clear-results-btn").addEventListener("click", clearResults);
+      // subscribe to live updates
       subscribeToVotes();
+      // admin sign-in is optional — clear button remains disabled until admin signs in
+      document.getElementById("clear-results-btn").disabled = true;
+      updateStatus();
     } else {
       alert("Incorrect password.");
       document.getElementById("password").value = "";
@@ -163,14 +238,12 @@ body {
   border: 1px solid rgba(255,255,255,0.5);
   color: white;
   font-weight: 600;
-  padding: 0.55rem 0;
-  width: 100%;
+  padding: 0.55rem 0.75rem;
   border-radius: 0.5rem;
   transition: all 0.2s ease;
 }
-.frosted-btn:hover {
-  background-color: rgba(255,255,255,0.15);
-}
+.frosted-btn:hover { background-color: rgba(255,255,255,0.12); }
+.small { font-size: 0.9rem; padding: 0.4rem 0.6rem; }
 </style>
 </head>
 
@@ -185,8 +258,9 @@ body {
     <form id="login-form" class="w-full max-w-xs mx-auto space-y-3">
       <input id="password" type="password" placeholder="Password"
         class="w-full px-4 py-2 rounded-lg bg-black/40 border border-white/30 text-white text-center focus:outline-none">
-      <button type="submit" class="frosted-btn">Enter</button>
+      <button type="submit" class="frosted-btn small">Enter</button>
     </form>
+    <p class="text-sm text-white/60">Use the event password to access this dashboard.</p>
   </div>
 </section>
 
@@ -195,15 +269,28 @@ body {
   <div class="glass-card">
     <img class="w-full max-w-[160px] mx-auto mb-3" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
     <h3 class="font-bold text-white text-xl mb-2">Live Voting Results</h3>
-    <div id="voting-status-label" class="text-green-400 font-semibold mb-2">Voting: ON</div>
-    <p id="total-votes" class="text-sm text-white/70 mb-3">Total Votes: 0</p>
 
-    <div class="flex justify-center gap-3 mb-3">
-      <button id="toggle-voting-btn" class="px-3 py-2 border border-white/40 rounded-lg text-white text-sm bg-black/30 hover:bg-white/10 transition">Turn Off Voting</button>
-      <button id="clear-results-btn" class="px-3 py-2 border border-white/40 rounded-lg text-white text-sm bg-black/30 hover:bg-white/10 transition">Clear Results</button>
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <div id="voting-status-label" class="text-green-400 font-semibold mb-1">Voting: ON</div>
+        <div id="total-votes" class="text-sm text-white/70">Total Votes: 0</div>
+      </div>
+
+      <div class="flex gap-2 items-center">
+        <button id="toggle-voting-btn" class="frosted-btn small">Turn Off Voting</button>
+        <button id="admin-signin-btn" class="frosted-btn small">Admin Sign In</button>
+      </div>
     </div>
 
     <div id="results-list" class="text-white"></div>
+
+    <div class="mt-4 flex items-center justify-between">
+      <div id="admin-status" class="text-sm text-white/60">Not signed in</div>
+      <div>
+        <button id="clear-results-btn" class="frosted-btn small" disabled>Clear Results</button>
+      </div>
+    </div>
+
     <p class="text-xs text-white/70 mt-2">Refreshing in real-time as votes are cast.</p>
   </div>
 </section>
