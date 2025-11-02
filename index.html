@@ -138,6 +138,15 @@ async function handleSignIn(email, password) {
   }
 }
 
+/* ========= Sign Out ========= */
+async function handleSignOut() {
+  await signOut(auth);
+  document.getElementById("results-section").classList.add("hidden");
+  document.getElementById("login-section").classList.remove("hidden");
+  document.getElementById("email").value = "";
+  document.getElementById("password").value = "";
+}
+
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     document.getElementById("login-section").classList.remove("hidden");
@@ -155,6 +164,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
   document.getElementById("clear-results-btn").addEventListener("click", clearResults);
+  document.getElementById("signout-btn").addEventListener("click", handleSignOut);
 });
 </script>
 
@@ -235,7 +245,11 @@ body {
 <!-- Results Screen -->
 <section id="results-section" class="fullscreen-center hidden">
   <div class="glass-card">
-    <img class="w-full max-w-[160px] mx-auto mb-3" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
+    <div class="flex items-center justify-between mb-2">
+      <img class="w-full max-w-[120px]" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
+      <button id="signout-btn" class="frosted-btn small">Sign Out</button>
+    </div>
+
     <h3 class="font-bold text-white text-xl mb-2">Live Voting Results</h3>
 
     <div class="flex items-center justify-between mb-3">
