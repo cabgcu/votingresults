@@ -16,7 +16,7 @@ import {
 import {
   getAuth, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { initializeAppCheck, ReCaptchaV3Provider } 
+import { initializeAppCheck, ReCaptchaV3Provider, getToken }
   from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app-check.js";
 
 /* ========= Firebase Config ========= */
@@ -39,6 +39,11 @@ const appCheck = initializeAppCheck(app, {
   isTokenAutoRefreshEnabled: true
 });
 
+/* ========= Live Token Check ========= */
+getToken(appCheck)
+  .then(t => console.log("✅ App Check token issued:", t?.token?.slice(0, 25) + "..."))
+  .catch(err => console.error("❌ App Check failed:", err));
+
 /* ========= Firestore + Auth ========= */
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -47,7 +52,7 @@ const auth = getAuth(app);
 let votingEnabled = true;
 const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2", "HYkN0qZc8aNgGOtrxT0VWKBWYbO2"];
 
-/* ========= SHA-256 helper (for Canyon49! password gate) ========= */
+/* ========= SHA-256 helper ========= */
 async function sha256Hex(text) {
   const enc = new TextEncoder().encode(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
@@ -102,7 +107,7 @@ async function toggleVoting() {
   updateStatus();
 }
 
-/* Clear results — requires whitelisted admin UID */
+/* ========= Clear Results (Admin Only) ========= */
 async function clearResults() {
   if (!confirm("Clear all votes? This is permanent.")) return;
 
@@ -165,7 +170,7 @@ async function adminSignOut() {
 }
 
 /* ========= DOM wiring ========= */
-const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27"; // SHA-256 of "Canyon49!"
+const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27"; // "Canyon49!"
 
 document.addEventListener("DOMContentLoaded", () => {
   const loginForm = document.getElementById("login-form");
