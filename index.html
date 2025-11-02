@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lip Sync 2025 Results</title>
 
-<!-- Tailwind -->
+<!-- Tailwind CSS -->
 <script src="https://cdn.tailwindcss.com"></script>
 
 <!-- Firebase -->
@@ -39,6 +39,7 @@ function subscribeToVotes() {
     renderResults(counts);
   });
 
+  // Listen to voting on/off state
   onSnapshot(doc(db, 'lip_sync_2025_settings', 'state'), snap => {
     if (snap.exists()) {
       votingEnabled = snap.data().enabled;
@@ -69,6 +70,7 @@ async function toggleVoting() {
   await setDoc(doc(db, 'lip_sync_2025_settings', 'state'), { enabled: votingEnabled });
   updateStatus();
 }
+
 async function clearResults() {
   if (!confirm("Clear all votes?")) return;
   const qSnap = await getDocs(collection(db, 'lip_sync_2025_votes'));
@@ -76,6 +78,7 @@ async function clearResults() {
   await Promise.all(deletions);
   alert("All results cleared!");
 }
+
 function updateStatus() {
   const label = document.getElementById('voting-status-label');
   label.textContent = votingEnabled ? "Voting: ON" : "Voting: OFF";
@@ -94,25 +97,23 @@ document.addEventListener("DOMContentLoaded", () => {
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
+body {
+  overflow: hidden;
+  background-color: black;
+  color: white;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Glass Card */
 .glass-card {
   background-color: rgba(0,0,0,0.45);
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255,255,255,0.15);
   border-bottom-color: rgba(255,255,255,0.03);
-  box-shadow: 0 0 20px rgba(255,105,180,0.5);
-  font-family: 'Inter', sans-serif;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3);
 }
 
-/* Pure Pink ↔ Green Glow Animation */
-@keyframes pink-green-glow {
-  0% { box-shadow: 0 0 20px 3px rgba(255,105,180,0.75); }
-  50% { box-shadow: 0 0 30px 6px rgba(96,163,77,0.9); }
-  100% { box-shadow: 0 0 20px 3px rgba(255,105,180,0.75); }
-}
-.glow {
-  animation: pink-green-glow 5s ease-in-out infinite;
-}
-
+/* Layout */
 #login-bg-video {
   position: fixed;
   top: 0; left: 0;
@@ -120,11 +121,6 @@ document.addEventListener("DOMContentLoaded", () => {
   object-fit: cover;
   z-index: -1;
   opacity: 0.8;
-}
-
-/* Laptop-friendly layout */
-body {
-  overflow: hidden;
 }
 #results-screen {
   display: flex;
@@ -135,7 +131,7 @@ body {
 .glass-card {
   width: 90%;
   max-width: 640px;
-  min-height: 440px;
+  min-height: 460px;
   padding: 2rem;
 }
 #results-list {
@@ -147,12 +143,12 @@ body {
 </style>
 </head>
 
-<body class="bg-black text-white font-sans">
+<body>
 <video autoplay loop muted playsinline id="login-bg-video" src="https://i.imgur.com/Aqrg8yc.mp4"></video>
 
 <!-- Results Screen -->
 <div id="results-screen" class="fixed inset-0 flex items-center justify-center p-4">
-  <div class="glass-card glow rounded-3xl text-center shadow-2xl">
+  <div class="glass-card rounded-3xl text-center shadow-2xl">
     <img class="w-full max-w-[180px] mx-auto mb-4" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
     <h3 class="text-2xl font-bold mb-3 text-white">Live Voting Results</h3>
     <div id="voting-status-label" class="text-green-400 font-semibold mb-3">Voting: ON</div>
