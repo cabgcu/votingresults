@@ -1,17 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Lip Sync 2025 Results</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lip Sync 2025 Voting</title>
 
+<!-- Tailwind CSS -->
 <script src="https://cdn.tailwindcss.com"></script>
 
+<!-- FingerprintJS -->
+<script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs/dist/fp.min.js"></script>
+
+<!-- Firebase -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-/* Firebase Config */
+/* ==========================================================
+   Firebase Config
+   ========================================================== */
 const firebaseConfig = {
   apiKey: "AIzaSyBoYf1_IhILJ96Y9KMcwrVjHMFLT5YEKuQ",
   authDomain: "lip-sync-2025.firebaseapp.com",
@@ -22,190 +30,311 @@ const firebaseConfig = {
   measurementId: "G-NQ0GMG05Q2"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
+/* ==========================================================
+   Variables
+   ========================================================== */
+let db, auth, userId;
+let visitorId = null;
+let selectedVoteId = null;
+let selectedVoteName = "";
+let appInitialized = false;
 let votingEnabled = true;
 
-/* SHA-256 helper */
-async function sha256Hex(text) {
-  const enc = new TextEncoder().encode(text);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
+/* ==========================================================
+   Geofences (Main campus + test area)
+   ========================================================== */
+const geofences = [
+  { minLat: 33.508268, maxLat: 33.511748, minLong: -112.130755, maxLong: -112.126984 },
+  { minLat: 33.512279, maxLat: 33.512623, minLong: -112.130699, maxLong: -112.130440 },
+  { minLat: 33.6786695, maxLat: 33.6789695, minLong: -112.256548, maxLong: -112.256248 }
+];
 
-/* Firestore listeners */
-function subscribeToVotes() {
-  const q = query(collection(db, "lip_sync_2025_votes"));
-  onSnapshot(q, (snap) => {
-    const counts = { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 };
-    snap.forEach(d => { if (d.data().voteId in counts) counts[d.data().voteId]++; });
-    renderResults(counts);
-  });
-  onSnapshot(doc(db, "lip_sync_2025_settings", "state"), (snap) => {
-    if (snap.exists()) {
-      votingEnabled = snap.data().enabled;
-      updateStatus();
-    }
-  });
-}
+let locationError, locationButton, performersContainer, submitVoteButton, confirmationMessage;
 
-function renderResults(counts) {
-  const names = ["Below","Deliverance","Mask Off","Metro Motion","Sin Games","Anonymity"];
-  const total = Object.values(counts).reduce((a,b)=>a+b,0);
-  const list = document.getElementById("results-list");
-  list.innerHTML = Object.keys(counts).map((id,i)=>{
-    const pct = total ? ((counts[id]/total)*100).toFixed(1) : 0;
-    return `
-      <div class="space-y-1 text-white">
-        <div class="flex justify-between text-xs sm:text-sm">
-          <span>${names[i]}</span>
-          <span>${counts[id]} votes (${pct}%)</span>
-        </div>
-        <div class="w-full h-3 bg-white/10 rounded-full overflow-hidden">
-          <div class="h-full bg-green-500 transition-all duration-700 ease-in-out" style="width:${pct}%"></div>
-        </div>
-      </div>`;
-  }).join('');
-  document.getElementById("total-votes").textContent = `Total Votes: ${total}`;
-}
-
-async function toggleVoting() {
-  votingEnabled = !votingEnabled;
-  await setDoc(doc(db, "lip_sync_2025_settings", "state"), { enabled: votingEnabled });
-  updateStatus();
-}
-
-async function clearResults() {
-  if (!confirm("Clear all votes?")) return;
-  const qSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
-  const deletions = qSnap.docs.map(d => deleteDoc(d.ref));
-  await Promise.all(deletions);
-  alert("All results cleared!");
-}
-
-function updateStatus() {
-  const label = document.getElementById("voting-status-label");
-  label.textContent = votingEnabled ? "Voting: ON" : "Voting: OFF";
-  label.className = votingEnabled ? "text-green-400 font-semibold mb-3" : "text-red-400 font-semibold mb-3";
-  document.getElementById("toggle-voting-btn").textContent = votingEnabled ? "Turn Off Voting" : "Turn On Voting";
-}
-
-/* Password Gate (SHA-256 hash of "Canyon49!") */
-const correctHash = "0a4fe117d8805dd33750e1e52cfa0be0d0d3e90cf03beb37b2a3443d76d99f27";
-
+/* ==========================================================
+   DOM Ready Setup
+   ========================================================== */
 document.addEventListener("DOMContentLoaded", () => {
-  const loginForm = document.getElementById("login-form");
-  const loginSection = document.getElementById("login-section");
-  const resultsSection = document.getElementById("results-section");
-
-  loginForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const entered = document.getElementById("password").value.trim();
-    const hash = await sha256Hex(entered);
-    if (hash === correctHash) {
-      loginSection.classList.add("hidden");
-      resultsSection.classList.remove("hidden");
-      document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
-      document.getElementById("clear-results-btn").addEventListener("click", clearResults);
-      subscribeToVotes();
-    } else {
-      alert("Incorrect password.");
-      document.getElementById("password").value = "";
-    }
-  });
+  locationError = document.getElementById("location-error");
+  locationButton = document.getElementById("location-btn");
+  performersContainer = document.getElementById("performers-container");
+  submitVoteButton = document.getElementById("submit-vote-btn");
+  confirmationMessage = document.getElementById("confirmation-message");
 });
+
+/* ==========================================================
+   Utility Functions
+   ========================================================== */
+function setScreen(id) {
+  document.querySelectorAll(".screen").forEach(el => el.classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+}
+
+function isInsideGeofence(lat, long) {
+  return geofences.some(({ minLat, maxLat, minLong, maxLong }) =>
+    lat >= minLat && lat <= maxLat && long >= minLong && long <= maxLong
+  );
+}
+
+function setLoading(isLoading, message = "Verifying your location...") {
+  if (!locationButton) return;
+  locationButton.disabled = isLoading;
+  if (isLoading) {
+    locationButton.classList.remove("glow");
+    locationButton.innerHTML = '<div class="spinner mx-auto"></div>';
+    locationError.textContent = message;
+  } else {
+    locationButton.classList.add("glow");
+    locationButton.innerHTML = "<span>Begin Voting</span>";
+  }
+}
+
+function showError(msg) {
+  setLoading(false);
+  if (!locationError) return;
+  locationError.textContent = msg;
+  locationError.classList.add("text-red-400", "font-bold");
+}
+
+function handleCardSelection(e) {
+  const card = e.target.closest(".performer-card");
+  if (!card || !votingEnabled) return;
+  document.querySelectorAll(".performer-card").forEach(c => c.classList.remove("selected"));
+  card.classList.add("selected");
+  selectedVoteId = card.dataset.voteId;
+  selectedVoteName = card.querySelector("h4").textContent;
+  submitVoteButton.disabled = false;
+  submitVoteButton.textContent = `Submit Vote for ${selectedVoteName}`;
+}
+
+/* ==========================================================
+   Check existing vote
+   ========================================================== */
+async function checkExistingVote() {
+  try {
+    const snap = await getDoc(doc(db, "lip_sync_2025_votes", userId));
+    return snap.exists();
+  } catch {
+    return false;
+  }
+}
+
+/* ==========================================================
+   Submit Vote (SECURE VERSION)
+   ========================================================== */
+async function submitVote(voteId, btn) {
+  if (!userId) return showError("Identity not ready.");
+  if (!votingEnabled) return showError("Voting is currently disabled.");
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+
+  try {
+    // ✅ Each vote stored under the authenticated UID
+    await setDoc(doc(db, "lip_sync_2025_votes", userId), {
+      voteId,
+      fingerprint: visitorId,
+      timestamp: Date.now()
+    });
+
+    confirmationMessage.textContent = `Your vote for ${selectedVoteName} has been counted.`;
+    setScreen("confirmation-screen");
+  } catch (e) {
+    console.error(e);
+    btn.textContent = "Vote Failed – Retry";
+    btn.disabled = false;
+    showError("Error saving vote.");
+  }
+}
+
+/* ==========================================================
+   Handle Geolocation & Geofence
+   ========================================================== */
+async function handleLocationCheck() {
+  if (!navigator.geolocation) return showError("Your device does not support location access.");
+  if (!votingEnabled) return showError("Voting is currently closed.");
+
+  setLoading(true, "Checking your location…");
+  const alreadyVoted = await checkExistingVote();
+  if (alreadyVoted) {
+    setScreen("confirmation-screen");
+    showError("You have already voted.");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const { latitude, longitude } = pos.coords;
+      if (isInsideGeofence(latitude, longitude)) {
+        setLoading(false);
+        setScreen("voting-screen");
+      } else {
+        showError("You must be within the event area to vote.");
+      }
+    },
+    err => {
+      if (err.code === err.PERMISSION_DENIED) {
+        showError("Location access is required to vote. Please enable location.");
+      } else {
+        showError("Unable to verify your location. Please refresh and try again.");
+      }
+    },
+    { timeout: 10000 }
+  );
+}
+
+/* ==========================================================
+   App Initialization
+   ========================================================== */
+function initApp() {
+  FingerprintJS.load()
+    .then(fp => fp.get())
+    .then(result => {
+      visitorId = result.visitorId;
+      locationError.textContent = "Location access is required to vote.";
+      locationButton.disabled = false;
+      locationButton.classList.add("glow");
+    })
+    .catch(() => showError("Unable to verify identity. Please refresh and try again."));
+
+  locationButton.addEventListener("click", handleLocationCheck);
+  performersContainer.addEventListener("click", handleCardSelection);
+  submitVoteButton.addEventListener("click", () => submitVote(selectedVoteId, submitVoteButton));
+
+  const settingsRef = doc(db, "lip_sync_2025_settings", "state");
+  onSnapshot(settingsRef, snap => {
+    if (snap.exists()) votingEnabled = snap.data().enabled;
+  });
+}
+
+/* ==========================================================
+   Firebase Bootstrapping
+   ========================================================== */
+const app = initializeApp(firebaseConfig);
+db = getFirestore(app);
+auth = getAuth(app);
+onAuthStateChanged(auth, user => {
+  if (user) {
+    userId = user.uid; // ✅ now used as doc ID
+    if (!appInitialized) {
+      appInitialized = true;
+      initApp();
+    }
+  }
+});
+signInAnonymously(auth).catch(console.error);
 </script>
 
 <style>
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
-body {
-  background-color: black;
-  color: white;
-  font-family: "Inter", sans-serif;
+html, body {
+  margin: 0;
+  height: 100%;
   overflow: hidden;
+  font-family: "Inter", sans-serif;
+  color: white;
 }
-#login-bg-video {
+#bg-video {
   position: fixed;
   top: 0; left: 0;
   width: 100%; height: 100%;
   object-fit: cover;
   z-index: -1;
-  opacity: 0.8;
-}
-.fullscreen-center {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  width: 100%;
+  pointer-events: none;
 }
 .glass-card {
   background-color: rgba(0,0,0,0.45);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 1rem;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
-  width: 90%;
-  max-width: 720px;
-  padding: 2rem;
-  text-align: center;
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-bottom-color: rgba(255,255,255,0.03);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.2);
 }
-#results-list {
-  display: grid;
-  grid-template-rows: repeat(6, 1fr);
-  gap: 0.75rem;
-  margin-top: 1rem;
+.spinner {
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  animation: spin .9s linear infinite;
+  display: block;
+  margin: 0 auto;
 }
-.frosted-btn {
-  backdrop-filter: blur(8px);
-  background-color: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.5);
-  color: white;
-  font-weight: 600;
-  padding: 0.55rem 0;
-  width: 100%;
-  border-radius: 0.5rem;
-  transition: all 0.2s ease;
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pink-green-glow {
+  0% { box-shadow: 0 0 15px 2px rgba(255,105,180,0.7); }
+  50% { box-shadow: 0 0 25px 5px rgba(96,163,77,0.9); }
+  100% { box-shadow: 0 0 15px 2px rgba(255,105,180,0.7); }
 }
-.frosted-btn:hover {
-  background-color: rgba(255,255,255,0.15);
+.glow {
+  background-color: rgba(0,0,0,0.6);
+  animation: pink-green-glow 8s ease-in-out infinite;
 }
+.performer-card.selected {
+  border: 2px solid white;
+  animation: pink-green-glow 8s ease-in-out infinite;
+}
+#submit-vote-btn:hover {
+  border-color: #60A34D;
+  box-shadow: 0 0 10px 2px rgba(96,163,77,0.9);
+}
+#performers-container {
+  overflow-y: auto;
+  max-height: 60vh;
+  padding-right: 4px;
+}
+.screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+#login-screen { overflow-y: auto; }
 </style>
 </head>
 
 <body>
-<video autoplay loop muted playsinline id="login-bg-video" src="https://i.imgur.com/Aqrg8yc.mp4"></video>
+<video autoplay loop muted playsinline id="bg-video" src="https://i.imgur.com/Aqrg8yc.mp4"></video>
 
-<!-- Password Screen -->
-<section id="login-section" class="fullscreen-center">
-  <div class="glass-card flex flex-col items-center justify-center space-y-6">
-    <img class="w-full max-w-[160px] mx-auto" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
-    <h2 class="text-xl font-bold">Enter Password</h2>
-    <form id="login-form" class="w-full max-w-xs mx-auto space-y-3">
-      <input id="password" type="password" placeholder="Password"
-        class="w-full px-4 py-2 rounded-lg bg-black/40 border border-white/30 text-white text-center focus:outline-none">
-      <button type="submit" class="frosted-btn">Enter</button>
-    </form>
+<!-- Login Screen -->
+<div id="login-screen" class="screen">
+  <div class="glass-card flex flex-col justify-between items-center text-center p-8 w-11/12 max-w-md rounded-3xl min-h-[440px] shadow-2xl mt-10 mb-10">
+    <img class="w-full max-w-[240px] mb-6" src="https://i.imgur.com/EnuWGLA.png" alt="Lip Sync Vote Header">
+    <p id="location-error" class="text-white/70 text-base mb-8 max-w-sm">Location access is required to vote.</p>
+    <button id="location-btn" class="w-auto min-w-[180px] px-8 py-3 text-base text-white rounded-xl border border-white/50 shadow-lg transition duration-200 glow">Begin Voting</button>
+    <footer class="pt-6 text-white/70 text-sm flex flex-col items-center max-w-sm mt-6">
+      <img src="https://ik.imagekit.io/cabgcu/Untitled%20design-3.png" alt="CAB Logo" class="h-12 mb-3 object-contain">
+      <p>Follow Us At <b>@CABGCU</b> On Instagram</p>
+    </footer>
   </div>
-</section>
+</div>
 
-<!-- Results Screen -->
-<section id="results-section" class="fullscreen-center hidden">
-  <div class="glass-card">
-    <img class="w-full max-w-[160px] mx-auto mb-3" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
-    <h3 class="font-bold text-white text-xl mb-2">Live Voting Results</h3>
-    <div id="voting-status-label" class="text-green-400 font-semibold mb-2">Voting: ON</div>
-    <p id="total-votes" class="text-sm text-white/70 mb-3">Total Votes: 0</p>
+<!-- Voting Screen -->
+<div id="voting-screen" class="screen hidden">
+  <div class="glass-card w-11/12 max-w-md rounded-3xl p-6 text-center shadow-2xl flex flex-col max-h-[90vh]">
+    <img class="w-full max-w-[180px] mx-auto mb-4" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
+    <h3 class="text-xl font-semibold mb-2">Vote For Your Favorite Lip Sync Team!</h3>
+    <p class="text-white/70 text-sm mb-4">Each attendee may submit only one vote.</p>
 
-    <div class="flex justify-center gap-3 mb-3">
-      <button id="toggle-voting-btn" class="px-3 py-2 border border-white/40 rounded-lg text-white text-sm bg-black/30 hover:bg-white/10 transition">Turn Off Voting</button>
-      <button id="clear-results-btn" class="px-3 py-2 border border-white/40 rounded-lg text-white text-sm bg-black/30 hover:bg-white/10 transition">Clear Results</button>
+    <div id="performers-container" class="space-y-4 flex-1">
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option1"><img src="https://i.imgur.com/DIyK2zX.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Below</h4></div>
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option2"><img src="https://i.imgur.com/s7Unz9r.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Deliverance</h4></div>
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option3"><img src="https://i.imgur.com/x0BI8Mc.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Mask Off</h4></div>
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option4"><img src="https://i.imgur.com/4rG47gL.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Metro Motion</h4></div>
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option5"><img src="https://i.imgur.com/k75mMUz.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Sin Games</h4></div>
+      <div class="performer-card bg-white/5 border border-white/10 p-4 rounded-xl cursor-pointer hover:border-white/50" data-vote-id="option6"><img src="https://i.imgur.com/3dJQFeX.jpeg" class="w-full aspect-video object-cover rounded-lg mb-2"><h4 class="text-lg font-semibold">Anonymity</h4></div>
     </div>
 
-    <div id="results-list" class="text-white"></div>
-    <p class="text-xs text-white/70 mt-2">Refreshing in real-time as votes are cast.</p>
+    <button id="submit-vote-btn" class="mt-6 w-full py-3 px-8 text-base bg-black border border-white/50 text-white rounded-xl transition disabled:opacity-40" disabled>Select a Performer to Vote</button>
   </div>
-</section>
+</div>
+
+<!-- Confirmation Screen -->
+<div id="confirmation-screen" class="screen hidden">
+  <div class="glass-card w-11/12 max-w-sm rounded-3xl p-8 text-center shadow-2xl">
+    <h3 class="text-3xl font-bold mb-4 text-white">✅ Vote Submitted!</h3>
+    <p id="confirmation-message" class="text-white text-base mb-6">Your vote has been counted. Thanks for joining Lip Sync: For Good!</p>
+  </div>
+</div>
 </body>
 </html>
