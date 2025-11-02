@@ -16,6 +16,8 @@ import {
 import {
   getAuth, signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { initializeAppCheck, ReCaptchaV3Provider } 
+  from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app-check.js";
 
 /* ========= Firebase Config ========= */
 const firebaseConfig = {
@@ -28,19 +30,29 @@ const firebaseConfig = {
   measurementId: "G-NQ0GMG05Q2"
 };
 
+/* ========= Firebase Init ========= */
 const app = initializeApp(firebaseConfig);
+
+/* ✅ App Check (reCAPTCHA v3) */
+const appCheck = initializeAppCheck(app, {
+  provider: new ReCaptchaV3Provider('6LdIDf8rAAAAAN29EDUYVkddlpw3QQy9ImSPFpm1'),
+  isTokenAutoRefreshEnabled: true
+});
+
+/* ========= Firestore + Auth ========= */
 const db = getFirestore(app);
 const auth = getAuth(app);
 
 /* ========= Globals ========= */
 let votingEnabled = true;
-const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2"]; // ✅ your admin UID
+const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2", "HYkN0qZc8aNgGOtrxT0VWKBWYbO2"];
 
 /* ========= SHA-256 helper (for Canyon49! password gate) ========= */
 async function sha256Hex(text) {
   const enc = new TextEncoder().encode(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 /* ========= Firestore listeners & rendering ========= */
