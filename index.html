@@ -34,6 +34,7 @@ const auth = getAuth(app);
 
 /* ========= Globals ========= */
 let votingEnabled = true;
+const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2"]; // ✅ your admin UID
 
 /* ========= SHA-256 helper (for Canyon49! password gate) ========= */
 async function sha256Hex(text) {
@@ -89,14 +90,18 @@ async function toggleVoting() {
   updateStatus();
 }
 
-/* Clear results — requires admin to be signed in with Firebase (email/password) */
+/* Clear results — requires whitelisted admin UID */
 async function clearResults() {
   if (!confirm("Clear all votes? This is permanent.")) return;
 
-  // Require authenticated admin
   const user = auth.currentUser;
   if (!user) {
-    alert("You must sign in as admin before clearing votes.");
+    alert("You must sign in before clearing votes.");
+    return;
+  }
+
+  if (!allowedAdmins.includes(user.uid)) {
+    alert("Access denied: you are not authorized to clear results.");
     return;
   }
 
@@ -123,8 +128,11 @@ function updateStatus() {
 async function adminSignIn(email, password) {
   try {
     await signInWithEmailAndPassword(auth, email, password);
-    document.getElementById("admin-status").textContent = `Signed in as ${auth.currentUser.email}`;
-    document.getElementById("clear-results-btn").disabled = false;
+    const uid = auth.currentUser.uid;
+    const label = allowedAdmins.includes(uid) ? " (Admin)" : "";
+    document.getElementById("admin-status").textContent =
+      `Signed in as ${auth.currentUser.email}${label}`;
+    document.getElementById("clear-results-btn").disabled = !allowedAdmins.includes(uid);
     document.getElementById("admin-signin-btn").textContent = "Sign Out";
   } catch (e) {
     console.error(e);
@@ -134,7 +142,7 @@ async function adminSignIn(email, password) {
 
 async function adminSignOut() {
   try {
-    await auth.signOut();
+    await signOut(auth);
   } catch (e) {
     console.error(e);
   } finally {
@@ -159,7 +167,6 @@ document.addEventListener("DOMContentLoaded", () => {
       await adminSignOut();
       return;
     }
-    // ask for email + password (admin should enter it here)
     const email = prompt("Admin email (example: admin@lipsync2025.com):");
     if (!email) return;
     const password = prompt("Admin password:");
@@ -176,12 +183,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const entered = document.getElementById("password").value.trim();
     const hash = await sha256Hex(entered);
     if (hash === correctHash) {
-      // Reveal results dashboard
       loginSection.classList.add("hidden");
       resultsSection.classList.remove("hidden");
-      // subscribe to live updates
       subscribeToVotes();
-      // admin sign-in is optional — clear button remains disabled until admin signs in
       document.getElementById("clear-results-btn").disabled = true;
       updateStatus();
     } else {
