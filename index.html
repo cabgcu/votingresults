@@ -4,11 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Lip Sync 2025 Results (Admin)</title>
-
 <script src="https://cdn.tailwindcss.com"></script>
 
 <script type="module">
-/* ========= Firebase imports ========= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import {
   getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs
@@ -32,31 +30,34 @@ const firebaseConfig = {
 
 /* ========= Firebase Init ========= */
 const app = initializeApp(firebaseConfig);
-
-/* ✅ App Check (reCAPTCHA v3) */
-const appCheck = initializeAppCheck(app, {
+initializeAppCheck(app, {
   provider: new ReCaptchaV3Provider('6LdIDf8rAAAAAN29EDUYVkddlpw3QQy9ImSPFpm1'),
   isTokenAutoRefreshEnabled: true
 });
 
-/* ========= Firestore + Auth ========= */
 const db = getFirestore(app);
 const auth = getAuth(app);
-
-/* ========= Globals ========= */
-let votingEnabled = true;
 const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2", "HYkN0qZc8aNgGOtrxT0VWKBWYbO2"];
+let votingEnabled = true;
 
-/* ========= Firestore listeners & rendering ========= */
+/* ========= Firestore listener ========= */
 function subscribeToVotes() {
   const q = query(collection(db, "lip_sync_2025_votes"));
   onSnapshot(q, (snap) => {
-    const counts = { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 };
+    const groups = {
+      arena: { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 },
+      online: { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 }
+    };
+
     snap.forEach(d => {
       const data = d.data();
-      if (data && data.voteId && counts.hasOwnProperty(data.voteId)) counts[data.voteId]++;
+      const source = data.voteSource === "online" ? "online" : "arena"; // default arena
+      if (data.voteId && groups[source].hasOwnProperty(data.voteId)) {
+        groups[source][data.voteId]++;
+      }
     });
-    renderResults(counts);
+
+    renderResults(groups);
   });
 
   onSnapshot(doc(db, "lip_sync_2025_settings", "state"), (snap) => {
@@ -67,11 +68,19 @@ function subscribeToVotes() {
   });
 }
 
-function renderResults(counts) {
-  const names = ["Below","Deliverance","Mask Off","Metro Motion","Sin Games","Anonymity"];
+/* ========= Render both groups ========= */
+function renderResults(groups) {
+  const names = ["Below","Deliverance","Mask Off","Metro Motion","Sin Game","Anonymity"];
+  renderGroup("arena", groups.arena, names);
+  renderGroup("online", groups.online, names);
+}
+
+function renderGroup(groupName, counts, names) {
   const total = Object.values(counts).reduce((a,b)=>a+b,0);
-  const list = document.getElementById("results-list");
-  list.innerHTML = Object.keys(counts).map((id,i)=>{
+  const container = document.getElementById(`${groupName}-results`);
+  const totalLabel = document.getElementById(`${groupName}-total`);
+  
+  container.innerHTML = Object.keys(counts).map((id,i)=>{
     const pct = total ? ((counts[id]/total)*100).toFixed(1) : 0;
     return `
       <div class="space-y-1 text-white">
@@ -84,7 +93,8 @@ function renderResults(counts) {
         </div>
       </div>`;
   }).join('');
-  document.getElementById("total-votes").textContent = `Total Votes: ${total}`;
+
+  totalLabel.textContent = `${groupName === "arena" ? "Arena" : "Online"} Votes: ${total}`;
 }
 
 /* ========= Controls ========= */
@@ -115,7 +125,7 @@ function updateStatus() {
   document.getElementById("toggle-voting-btn").textContent = votingEnabled ? "Turn Off Voting" : "Turn On Voting";
 }
 
-/* ========= Auth Logic ========= */
+/* ========= Auth ========= */
 async function handleSignIn(email, password) {
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
@@ -138,7 +148,6 @@ async function handleSignIn(email, password) {
   }
 }
 
-/* ========= Sign Out ========= */
 async function handleSignOut() {
   await signOut(auth);
   document.getElementById("results-section").classList.add("hidden");
@@ -161,7 +170,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const password = document.getElementById("password").value.trim();
     await handleSignIn(email, password);
   });
-
   document.getElementById("toggle-voting-btn").addEventListener("click", toggleVoting);
   document.getElementById("clear-results-btn").addEventListener("click", clearResults);
   document.getElementById("signout-btn").addEventListener("click", handleSignOut);
@@ -202,12 +210,6 @@ body {
   padding: 2rem;
   text-align: center;
 }
-#results-list {
-  display: grid;
-  grid-template-rows: repeat(6, 1fr);
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
 .frosted-btn {
   backdrop-filter: blur(8px);
   background-color: rgba(255,255,255,0.05);
@@ -220,16 +222,23 @@ body {
 }
 .frosted-btn:hover { background-color: rgba(255,255,255,0.12); }
 .small { font-size: 0.9rem; padding: 0.4rem 0.6rem; }
+.section-title {
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-top: 1.2rem;
+  margin-bottom: 0.4rem;
+  text-align: left;
+}
 </style>
 </head>
 
 <body>
 <video autoplay loop muted playsinline id="login-bg-video" src="https://i.imgur.com/mAzP2S1.mp4"></video>
 
-<!-- Admin Login Screen -->
+<!-- Admin Login -->
 <section id="login-section" class="fullscreen-center">
   <div class="glass-card flex flex-col items-center justify-center space-y-6">
-    <img class="w-full max-w-[160px] mx-auto" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
+    <img class="w-full max-w-[160px]" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
     <h2 class="text-xl font-bold">Admin Login</h2>
     <form id="login-form" class="w-full max-w-xs mx-auto space-y-3">
       <input id="email" type="email" placeholder="Admin Email"
@@ -252,22 +261,25 @@ body {
     <div class="flex items-center justify-between mb-3">
       <div>
         <div id="voting-status-label" class="text-green-400 font-semibold mb-1">Voting: ON</div>
-        <div id="total-votes" class="text-sm text-white/70">Total Votes: 0</div>
+        <div id="arena-total" class="text-sm text-white/70">Arena Votes: 0</div>
+        <div id="online-total" class="text-sm text-white/70">Online Votes: 0</div>
       </div>
-
       <div class="flex gap-2 items-center">
         <button id="toggle-voting-btn" class="frosted-btn small">Turn Off Voting</button>
         <button id="clear-results-btn" class="frosted-btn small">Clear Results</button>
       </div>
     </div>
 
-    <div id="results-list" class="text-white"></div>
+    <h4 class="section-title">Arena Votes</h4>
+    <div id="arena-results" class="space-y-2 mb-4"></div>
+
+    <h4 class="section-title">Online Votes</h4>
+    <div id="online-results" class="space-y-2 mb-4"></div>
 
     <div class="mt-4 flex items-center justify-between">
       <div id="admin-status" class="text-sm text-white/60">Not signed in</div>
     </div>
-
-    <p class="text-xs text-white/70 mt-2">Refreshing in real-time as votes are cast.</p>
+    <p class="text-xs text-white/70 mt-2">Refreshing in real time as votes are cast.</p>
   </div>
 </section>
 </body>
