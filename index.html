@@ -116,16 +116,31 @@ async function toggleVoting() {
   updateStatus();
 }
 
+/* ========= ✅ Clear Everything ========= */
 async function clearResults() {
-  if (!confirm("Clear all votes? This is permanent.")) return;
+  if (!confirm("Clear all votes and reset IDs? This is permanent.")) return;
+
   try {
-    const qSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
-    const deletions = qSnap.docs.map(d => deleteDoc(d.ref));
-    await Promise.all(deletions);
-    alert("All results cleared!");
+    // 🗳 Clear votes
+    const votesSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
+    const voteDeletions = votesSnap.docs.map(d => deleteDoc(d.ref));
+
+    // 📱 Clear device fingerprints
+    const fpSnap = await getDocs(collection(db, "voted_fingerprints"));
+    const fpDeletions = fpSnap.docs.map(d => deleteDoc(d.ref));
+
+    // 🧑‍🎓 Reset all student IDs
+    const idSnap = await getDocs(collection(db, "student_ids"));
+    const idResets = idSnap.docs.map(d =>
+      setDoc(d.ref, { hasVoted: false }, { merge: true })
+    );
+
+    await Promise.all([...voteDeletions, ...fpDeletions, ...idResets]);
+
+    alert("All votes, fingerprints, and student ID flags have been cleared!");
   } catch (e) {
     console.error(e);
-    alert("Failed to clear votes: " + (e.message || e));
+    alert("Failed to clear data: " + (e.message || e));
   }
 }
 
