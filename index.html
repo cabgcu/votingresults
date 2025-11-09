@@ -22,7 +22,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyBoYf1_IhILJ96Y9KMcwrVjHMFLT5YEKuQ",
   authDomain: "lip-sync-2025.firebaseapp.com",
   projectId: "lip-sync-2025",
-  storageBucket: "lip-sync-2025.appspot.com", // ✅ fixed bucket domain
+  storageBucket: "lip-sync-2025.appspot.com",
   messagingSenderId: "118581305479",
   appId: "1:118581305479:web:7a7335c1be6e816cc7d822",
   measurementId: "G-NQ0GMG05Q2"
@@ -109,7 +109,7 @@ function renderGroup(groupName, counts, names) {
   }).join('');
 }
 
-/* ========= Controls ========= */
+/* ========= Toggle Voting ========= */
 async function toggleVoting() {
   votingEnabled = !votingEnabled;
   await setDoc(doc(db, "lip_sync_2025_settings", "state"), { enabled: votingEnabled });
@@ -118,10 +118,21 @@ async function toggleVoting() {
 
 /* ========= ✅ Clear Everything ========= */
 async function clearResults() {
-  if (!confirm("Clear all votes and reset IDs? This is permanent.")) return;
+  if (!confirm("⚠️ This will reset ALL votes, fingerprints, and student ID locks. Continue?")) return;
 
   try {
-    // 🗳 Clear votes
+    const clearBtn = document.getElementById("clear-results-btn");
+    clearBtn.disabled = true;
+    clearBtn.textContent = "Clearing...";
+
+    document.getElementById("combined-results").innerHTML = "";
+    document.getElementById("arena-results").innerHTML = "";
+    document.getElementById("online-results").innerHTML = "";
+    document.getElementById("combined-total").textContent = "Total Combined Votes: 0";
+    document.getElementById("arena-total").textContent = "Arena Votes: 0";
+    document.getElementById("online-total").textContent = "Online Votes: 0";
+
+    // 🗳 Clear all votes
     const votesSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
     const voteDeletions = votesSnap.docs.map(d => deleteDoc(d.ref));
 
@@ -137,10 +148,14 @@ async function clearResults() {
 
     await Promise.all([...voteDeletions, ...fpDeletions, ...idResets]);
 
-    alert("All votes, fingerprints, and student ID flags have been cleared!");
+    alert("✅ All votes cleared and Student IDs reset!");
   } catch (e) {
     console.error(e);
     alert("Failed to clear data: " + (e.message || e));
+  } finally {
+    const clearBtn = document.getElementById("clear-results-btn");
+    clearBtn.disabled = false;
+    clearBtn.textContent = "Clear Results";
   }
 }
 
