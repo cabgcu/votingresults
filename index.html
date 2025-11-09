@@ -4,12 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Lip Sync 2025 Results (Admin)</title>
-<script src="https://cdn.tailwindcss.com"></script>
 
+<script src="https://cdn.tailwindcss.com"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import {
-  getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs
+  getFirestore, collection, query, onSnapshot, doc, setDoc, deleteDoc,
+  getDocs, writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import {
   getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
@@ -37,7 +38,11 @@ initializeAppCheck(app, {
 
 const db = getFirestore(app);
 const auth = getAuth(app);
-const allowedAdmins = ["Mkcsfn5E4LSOiiXeCl7sVgCrCzr2", "HYkN0qZc8aNgGOtrxT0VWKBWYbO2"];
+const allowedAdmins = [
+  "Mkcsfn5E4LSOiiXeCl7sVgCrCzr2",
+  "HYkN0qZc8aNgGOtrxT0VWKBWYbO2",
+  "YOUR_NEW_UID_HERE"
+];
 let votingEnabled = true;
 
 /* ========= Firestore listener ========= */
@@ -48,7 +53,6 @@ function subscribeToVotes() {
       arena: { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 },
       online: { option1:0, option2:0, option3:0, option4:0, option5:0, option6:0 }
     };
-
     snap.forEach(d => {
       const data = d.data();
       const source = data.voteSource === "online" ? "online" : "arena";
@@ -56,12 +60,10 @@ function subscribeToVotes() {
         groups[source][data.voteId]++;
       }
     });
-
     const combined = {};
     Object.keys(groups.arena).forEach(k => {
       combined[k] = (groups.arena[k] || 0) + (groups.online[k] || 0);
     });
-
     renderAll(groups, combined);
   });
 
@@ -79,11 +81,9 @@ function renderAll(groups, combined) {
   renderGroup("combined", combined, names);
   renderGroup("arena", groups.arena, names);
   renderGroup("online", groups.online, names);
-
   const arenaTotal = Object.values(groups.arena).reduce((a,b)=>a+b,0);
   const onlineTotal = Object.values(groups.online).reduce((a,b)=>a+b,0);
   const combinedTotal = Object.values(combined).reduce((a,b)=>a+b,0);
-
   document.getElementById("arena-total").textContent = `Arena Votes: ${arenaTotal}`;
   document.getElementById("online-total").textContent = `Online Votes: ${onlineTotal}`;
   document.getElementById("combined-total").textContent = `Total Combined Votes: ${combinedTotal}`;
@@ -93,7 +93,6 @@ function renderGroup(groupName, counts, names) {
   const total = Object.values(counts).reduce((a,b)=>a+b,0);
   const container = document.getElementById(`${groupName}-results`);
   if (!container) return;
-
   container.innerHTML = Object.keys(counts).map((id,i)=>{
     const pct = total ? ((counts[id]/total)*100).toFixed(1) : 0;
     return `
@@ -116,46 +115,60 @@ async function toggleVoting() {
   updateStatus();
 }
 
-/* ========= ✅ Clear Everything ========= */
+/* ========= ⚡ Optimized Clear Function ========= */
 async function clearResults() {
   if (!confirm("⚠️ This will reset ALL votes, fingerprints, and student ID locks. Continue?")) return;
 
+  const clearBtn = document.getElementById("clear-results-btn");
+  const progress = document.getElementById("progress-bar");
+  clearBtn.disabled = true;
+  clearBtn.textContent = "Clearing…";
+
+  const updateStatus = (msg) => {
+    document.getElementById("combined-total").textContent = msg;
+  };
+
+  async function batchProcess(colName, isReset=false) {
+    const snap = await getDocs(collection(db, colName));
+    const docs = snap.docs;
+    let processed = 0, total = docs.length, written = 0;
+
+    for (let i = 0; i < docs.length; i += 400) {
+      const slice = docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      slice.forEach(d => {
+        if (isReset) {
+          const data = d.data();
+          if (data.hasVoted) { // only reset if true
+            batch.set(d.ref, { hasVoted: false }, { merge: true });
+            written++;
+          }
+        } else {
+          batch.delete(d.ref);
+          written++;
+        }
+      });
+      await batch.commit();
+      processed += slice.length;
+      const pct = Math.min(100, Math.round((processed / total) * 100));
+      progress.style.width = pct + "%";
+      updateStatus(`Clearing ${colName}: ${processed}/${total} (${written} writes)`);
+    }
+  }
+
   try {
-    const clearBtn = document.getElementById("clear-results-btn");
-    clearBtn.disabled = true;
-    clearBtn.textContent = "Clearing...";
-
-    document.getElementById("combined-results").innerHTML = "";
-    document.getElementById("arena-results").innerHTML = "";
-    document.getElementById("online-results").innerHTML = "";
-    document.getElementById("combined-total").textContent = "Total Combined Votes: 0";
-    document.getElementById("arena-total").textContent = "Arena Votes: 0";
-    document.getElementById("online-total").textContent = "Online Votes: 0";
-
-    // 🗳 Clear all votes
-    const votesSnap = await getDocs(collection(db, "lip_sync_2025_votes"));
-    const voteDeletions = votesSnap.docs.map(d => deleteDoc(d.ref));
-
-    // 📱 Clear device fingerprints
-    const fpSnap = await getDocs(collection(db, "voted_fingerprints"));
-    const fpDeletions = fpSnap.docs.map(d => deleteDoc(d.ref));
-
-    // 🧑‍🎓 Reset all student IDs
-    const idSnap = await getDocs(collection(db, "student_ids"));
-    const idResets = idSnap.docs.map(d =>
-      setDoc(d.ref, { hasVoted: false }, { merge: true })
-    );
-
-    await Promise.all([...voteDeletions, ...fpDeletions, ...idResets]);
-
-    alert("✅ All votes cleared and Student IDs reset!");
-  } catch (e) {
-    console.error(e);
-    alert("Failed to clear data: " + (e.message || e));
+    await batchProcess("lip_sync_2025_votes");
+    await batchProcess("voted_fingerprints");
+    await batchProcess("student_ids", true);
+    updateStatus("✅ All data cleared and student IDs reset!");
+    alert("✅ Clear complete!");
+  } catch (err) {
+    console.error(err);
+    alert("❌ Failed to clear data: " + (err.message || err));
   } finally {
-    const clearBtn = document.getElementById("clear-results-btn");
     clearBtn.disabled = false;
     clearBtn.textContent = "Clear Results";
+    progress.style.width = "0%";
   }
 }
 
@@ -172,19 +185,16 @@ async function handleSignIn(email, password) {
   try {
     const userCred = await signInWithEmailAndPassword(auth, email, password);
     const uid = userCred.user.uid;
-
     if (!allowedAdmins.includes(uid)) {
       alert("Access denied: you are not authorized.");
       await signOut(auth);
       return;
     }
-
     document.getElementById("login-section").classList.add("hidden");
     document.getElementById("results-section").classList.remove("hidden");
     document.getElementById("admin-status").textContent = `Signed in as ${email} (Admin)`;
     subscribeToVotes();
     updateStatus();
-
   } catch (e) {
     alert("Sign-in failed: " + (e.message || e));
   }
@@ -271,6 +281,20 @@ body {
   margin-bottom: 0.4rem;
   text-align: left;
 }
+#progress-container {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+#progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(to right, #22c55e, #16a34a);
+  transition: width 0.3s ease;
+}
 </style>
 </head>
 
@@ -306,6 +330,7 @@ body {
         <div id="combined-total" class="text-sm text-white/70">Total Combined Votes: 0</div>
         <div id="arena-total" class="text-sm text-white/70">Arena Votes: 0</div>
         <div id="online-total" class="text-sm text-white/70">Online Votes: 0</div>
+        <div id="progress-container"><div id="progress-bar"></div></div>
       </div>
       <div class="flex gap-2 items-center">
         <button id="toggle-voting-btn" class="frosted-btn small">Turn Off Voting</button>
