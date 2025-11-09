@@ -51,13 +51,19 @@ function subscribeToVotes() {
 
     snap.forEach(d => {
       const data = d.data();
-      const source = data.voteSource === "online" ? "online" : "arena"; // default arena
+      const source = data.voteSource === "online" ? "online" : "arena";
       if (data.voteId && groups[source].hasOwnProperty(data.voteId)) {
         groups[source][data.voteId]++;
       }
     });
 
-    renderResults(groups);
+    // Compute combined totals
+    const combined = {};
+    Object.keys(groups.arena).forEach(k => {
+      combined[k] = (groups.arena[k] || 0) + (groups.online[k] || 0);
+    });
+
+    renderAll(groups, combined);
   });
 
   onSnapshot(doc(db, "lip_sync_2025_settings", "state"), (snap) => {
@@ -68,17 +74,27 @@ function subscribeToVotes() {
   });
 }
 
-/* ========= Render both groups ========= */
-function renderResults(groups) {
+/* ========= Render All ========= */
+function renderAll(groups, combined) {
   const names = ["Below","Deliverance","Mask Off","Metro Motion","Sin Game","Anonymity"];
+
+  renderGroup("combined", combined, names);
   renderGroup("arena", groups.arena, names);
   renderGroup("online", groups.online, names);
+
+  const arenaTotal = Object.values(groups.arena).reduce((a,b)=>a+b,0);
+  const onlineTotal = Object.values(groups.online).reduce((a,b)=>a+b,0);
+  const combinedTotal = Object.values(combined).reduce((a,b)=>a+b,0);
+
+  document.getElementById("arena-total").textContent = `Arena Votes: ${arenaTotal}`;
+  document.getElementById("online-total").textContent = `Online Votes: ${onlineTotal}`;
+  document.getElementById("combined-total").textContent = `Total Combined Votes: ${combinedTotal}`;
 }
 
 function renderGroup(groupName, counts, names) {
   const total = Object.values(counts).reduce((a,b)=>a+b,0);
   const container = document.getElementById(`${groupName}-results`);
-  const totalLabel = document.getElementById(`${groupName}-total`);
+  if (!container) return;
   
   container.innerHTML = Object.keys(counts).map((id,i)=>{
     const pct = total ? ((counts[id]/total)*100).toFixed(1) : 0;
@@ -93,8 +109,6 @@ function renderGroup(groupName, counts, names) {
         </div>
       </div>`;
   }).join('');
-
-  totalLabel.textContent = `${groupName === "arena" ? "Arena" : "Online"} Votes: ${total}`;
 }
 
 /* ========= Controls ========= */
@@ -253,7 +267,7 @@ body {
 
 <!-- Results Screen -->
 <section id="results-section" class="fullscreen-center hidden">
-  <div class="glass-card relative">
+  <div class="glass-card relative overflow-y-auto max-h-[95vh]">
     <button id="signout-btn" class="absolute top-4 right-4 frosted-btn small">Sign Out</button>
     <img class="w-full max-w-[160px] mx-auto mb-3" src="https://i.imgur.com/EnuWGLA.png" alt="Header">
     <h3 class="font-bold text-white text-xl mb-2">Live Voting Results</h3>
@@ -261,6 +275,7 @@ body {
     <div class="flex items-center justify-between mb-3">
       <div>
         <div id="voting-status-label" class="text-green-400 font-semibold mb-1">Voting: ON</div>
+        <div id="combined-total" class="text-sm text-white/70">Total Combined Votes: 0</div>
         <div id="arena-total" class="text-sm text-white/70">Arena Votes: 0</div>
         <div id="online-total" class="text-sm text-white/70">Online Votes: 0</div>
       </div>
@@ -269,6 +284,9 @@ body {
         <button id="clear-results-btn" class="frosted-btn small">Clear Results</button>
       </div>
     </div>
+
+    <h4 class="section-title">Total Combined Votes</h4>
+    <div id="combined-results" class="space-y-2 mb-4"></div>
 
     <h4 class="section-title">Arena Votes</h4>
     <div id="arena-results" class="space-y-2 mb-4"></div>
