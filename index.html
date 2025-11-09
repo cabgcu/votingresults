@@ -22,7 +22,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyBoYf1_IhILJ96Y9KMcwrVjHMFLT5YEKuQ",
   authDomain: "lip-sync-2025.firebaseapp.com",
   projectId: "lip-sync-2025",
-  storageBucket: "lip-sync-2025.firebasestorage.app",
+  storageBucket: "lip-sync-2025.appspot.com", // ✅ fixed bucket domain
   messagingSenderId: "118581305479",
   appId: "1:118581305479:web:7a7335c1be6e816cc7d822",
   measurementId: "G-NQ0GMG05Q2"
@@ -57,7 +57,6 @@ function subscribeToVotes() {
       }
     });
 
-    // Compute combined totals
     const combined = {};
     Object.keys(groups.arena).forEach(k => {
       combined[k] = (groups.arena[k] || 0) + (groups.online[k] || 0);
@@ -77,7 +76,6 @@ function subscribeToVotes() {
 /* ========= Render All ========= */
 function renderAll(groups, combined) {
   const names = ["Below","Deliverance","Mask Off","Metro Motion","Sin Game","Anonymity"];
-
   renderGroup("combined", combined, names);
   renderGroup("arena", groups.arena, names);
   renderGroup("online", groups.online, names);
@@ -95,7 +93,7 @@ function renderGroup(groupName, counts, names) {
   const total = Object.values(counts).reduce((a,b)=>a+b,0);
   const container = document.getElementById(`${groupName}-results`);
   if (!container) return;
-  
+
   container.innerHTML = Object.keys(counts).map((id,i)=>{
     const pct = total ? ((counts[id]/total)*100).toFixed(1) : 0;
     return `
